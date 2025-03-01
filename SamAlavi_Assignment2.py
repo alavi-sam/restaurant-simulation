@@ -4,6 +4,8 @@ import random
 import numpy as np
 import math
 
+import simpy.resources
+
 
 MEAN_PREP = 9
 STD_PREP = 2
@@ -40,3 +42,28 @@ def prep_gen():
 def value_gen():
     return np.random.normal(MEAN_ORDER_VAL, STD_ORDER_VAL)
 
+
+
+class MonitoredResource(simpy.Resource):
+    def __init__(self, *args, **kwargs):
+        super().__init__(self, *args, **kwargs)
+        self.last_update = 0
+        self.busy_time = 0
+    
+
+    def request(self):
+        self.update_status()
+        return super().request()
+    
+    
+    def release(self, request):
+        self.update_stauts()
+        return super().release(request)
+
+
+    def update_status(self):
+        if self.count > 0:
+            interval_time = self._env.now - self.last_update
+            self.busy_time +=  len(self.users) * interval_time
+            self.last_update = self._env.now
+                
