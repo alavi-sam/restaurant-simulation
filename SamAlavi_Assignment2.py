@@ -49,7 +49,18 @@ class ChefMonitoredResource(simpy.Resource):
         super().__init__(env, capacity)
         self.last_update = 0
         self.busy_time = 0
-    
+        self.queue_time = 0
+        self.order_values = []
+        self.chef_wait_time = []
+
+
+    def record_order_value(self, value):
+        self.order_values.append(value)
+
+
+    def record_chef_wait_times(self, wait_time):
+        self.chef_wait_time.append(wait_time)
+
 
     def request(self):
         self.update_status()
@@ -65,7 +76,8 @@ class ChefMonitoredResource(simpy.Resource):
         if self.count > 0:
             interval_time = self._env.now - self.last_update
             self.busy_time +=  len(self.users) * interval_time
-            self.last_update = self._env.now
+            self.queue_time += len(self.users) * interval_time
+        self.last_update = self._env.now
 
 
 
@@ -74,45 +86,55 @@ class DroneMonitoredResource(simpy.Resource):
         super().__init__(env, capacity)
         self.last_update = 0
         self.busy_time = 0
+        self.queue_time = 0
         self.battery_level = 100
         self.is_charged = self._env.event()
         self.is_charged.succeed()
+        self.drone_wait_time = []
+        self.battery_level_list = []
+        self.delivery_times = []
 
 
-    def take_off_drain_battery(self):
-        self.battery_level -= TAKE_OFF_DRAIN
+    def record_drone_wait_time(self, req, wait_time):
+        req.drone_wait_time.append(wait_time)
 
 
-    def landing_drain_battery(self):
-        self.battery_level -= LAND_DRAIN
+    def record_delivery_time(self, req, delivery_time):
+        req.delivery_times.append(delivery_time)
 
 
-    def distance_drain_battery(self, distance_travelled):
-        self.battery_level -= distance_travelled * PER_KM_DRAIN
+    def take_off_drain_battery(self, req):
+        req.battery_level -= TAKE_OFF_DRAIN
 
 
-    def charge(self):
-        t = charge_time(self.battery_level)
+    def landing_drain_battery(self, req):
+        req.battery_level -= LAND_DRAIN
+
+
+    def distance_drain_battery(self, req, distance_travelled):
+        req.battery_level -= distance_travelled * PER_KM_DRAIN
+
+
+    def charge(self, req):
+        t = charge_time(req.battery_level)
         yield self._env.timeout(t)
-        self.is_charged.succeed()
-        self.battery_level = 100
+        req.is_charged.succeed()
+        req.battery_level = 100
     
 
     def request(self):
         if not self.is_charged.triggered:
-            self.is_charged = self._env.event()
-            self._env.process(self.charge())
-
+            yield self.is_charged
         req = super().request()
-        yield req
         self.update_status()
         return req
         
     
     def release(self, request):
         super().release(request)
-        self.is_charged = self._env.event()
-        self._env.process(self.charge())
+        request.battery_level_list.append(request.battery_level)
+        request.is_charged = request._env.event()
+        self._env.process(request.charge())
         self.update_status()
 
 
@@ -120,17 +142,9 @@ class DroneMonitoredResource(simpy.Resource):
         if self.count > 0:
             interval_time = self._env.now - self.last_update
             self.busy_time +=  len(self.users) * interval_time
-            self.last_update = self._env.now
+            self.queue_time += len(self.users) * interval_time
+        self.last_update = self._env.now
 
-
-MEAN_INTERVAL = 7
-DRONE_COUNT = 2
-CHEF_COUNT = 2
-
-
-env = simpy.Environment()
-drone_resource = DroneMonitoredResource(env=env, capacity=DRONE_COUNT)
-chef_resource = ChefMonitoredResource(env=env, capacity=CHEF_COUNT)
 
 
 def order_source(env: simpy.Environment, chef_resource: ChefMonitoredResource, drone_resource:DroneMonitoredResource):
@@ -148,37 +162,60 @@ def order_prep(
         order_value,
         order_location
 ):
+    chef_request_time = env.now
     with chef_resource.request() as chef_request:
         yield chef_request
+        chef_wait_time = env.now - chef_request_time
+        chef_resource.record_chef_wait_times(chef_wait_time)
+        chef_resource.record_order_value(order_value)
+
         prep_time = prep_gen()
         yield env.timeout(prep_time)
 
+    drone_request_time = env.now
     with drone_resource.request() as drone_request:
         yield drone_request
+        drone_release_time = env.now
+        drone_resource.record_drone_wait_time(drone_request, drone_release_time - drone_request_time)
 
-        drone_resource.take_off_drain_battery()
+        drone_resource.take_off_drain_battery(drone_request)
         yield env.timeout(TAKE_OFF_TIME)
 
         travel_distance = distance(*order_location)
-        drone_resource.distance_drain_battery(travel_distance)
+        drone_resource.distance_drain_battery(drone_request, travel_distance)
         travel_time = travel_distance / DRONE_SPEED
         yield env.timeout(travel_time * 60)
 
         yield env.timeout(LAND_TIME)
-        drone_resource.landing_drain_battery()
+        drone_resource.landing_drain_battery(drone_request)
 
         yield env.timeout(CUSTOMER_PICKUP_TIME)
 
-        drone_resource.take_off_drain_battery()
+        drone_resource.take_off_drain_battery(drone_request)
         yield env.timeout(TAKE_OFF_TIME)
 
         yield env.timeout(travel_time * 60)
-        drone_resource.distance_drain_battery(travel_distance)
+        drone_resource.distance_drain_battery(drone_request, travel_distance)
 
         yield env.timeout(LAND_TIME)
-        drone_resource.landing_drain_battery()
+        drone_resource.landing_drain_battery(drone_request)
+
+        drone_delivered_time = env.now
+        drone_resource.record_delivery_time(drone_request, drone_delivered_time - chef_request_time)
 
 
 if __name__ == '__main__':
-    env.process(order_source)
+    MEAN_INTERVAL = 7
+    DRONE_COUNT = 2
+    CHEF_COUNT = 2
+    revenue = 0
+
+    env = simpy.Environment()
+    drone_resource = DroneMonitoredResource(env=env, capacity=DRONE_COUNT)
+    chef_resource = ChefMonitoredResource(env=env, capacity=CHEF_COUNT)
+    env.process(order_source(env, chef_resource, drone_resource))
+    print("delivery times:", drone_resource.delivery_times)
+    print("drone wait time:", drone_resource.drone_wait_time)
+    print("chef wait time:", chef_resource.chef_wait_time)
+    print("order values", chef_resource.order_values)
     env.run()
