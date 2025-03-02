@@ -253,6 +253,12 @@ if __name__ == '__main__':
     print("mean drone wait time:", sum(drone_resource.drone_wait_time_list)/len(drone_resource.drone_wait_time_list))
     print("mean chef wait time:", sum(chef_resource.chef_wait_time)/len(chef_resource.chef_wait_time))
     print("mean order value:", sum(chef_resource.order_values)/len(chef_resource.order_values))
+
+    print(
+        "90% percent of the orders are arrived in less than",
+        sorted(drone_resource.delivery_times)[len(drone_resource.delivery_times)*9//10],
+        'minutes.'
+        )
     
     plt.hist(drone_resource.delivery_times)
     plt.xlabel('Histogram of delivery times')
