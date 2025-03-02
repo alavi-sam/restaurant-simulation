@@ -2,13 +2,14 @@ import simpy
 import random
 import numpy as np
 import math
+import matplotlib.pyplot as plt
 
 
 
 MEAN_PREP = 9
 STD_PREP = 2
 LOAD_TIME = 2
-RUN_TIME = 8
+RUN_TIME = 8 # Hours
 MEAN_ORDER_VAL = 145
 STD_ORDER_VAL = 41
 DRONE_SPEED = 60 # per Hour
@@ -34,8 +35,10 @@ def charge_time(curr_batt):
 
 
 def prep_gen():
-    return np.random.normal(MEAN_PREP, STD_PREP)
-
+    prep_time = random.normalvariate(MEAN_PREP, STD_PREP)
+    while prep_time < 0:
+        prep_time = random.normalvariate(MEAN_PREP, STD_PREP)
+    return prep_time
 
 def value_gen():
     return np.random.normal(MEAN_ORDER_VAL, STD_ORDER_VAL)
@@ -219,6 +222,19 @@ def order_prep(
     drone_resource.release(req, drone)
 
 
+
+def optimize_chef_drone(drone_number, chef_number):
+    sum_mean_delivery_time = 0
+    for _ in range(100):
+        env = simpy.Environment()
+        drone_resource = DroneMonitoredResource(env, drone_number)
+        chef_resource = ChefMonitoredResource(env, chef_number)
+        env.process(order_source(env, chef_resource, drone_resource))
+        env.run()
+        sum_mean_delivery_time += sum(drone_resource.delivery_times)/len(drone_resource.delivery_times)
+    return sum_mean_delivery_time / 100
+
+
 if __name__ == '__main__':
     MEAN_INTERVAL = 7
     DRONE_COUNT = 2
@@ -235,4 +251,35 @@ if __name__ == '__main__':
     env.run()
     print("mean delivery times:", sum(drone_resource.delivery_times)/len(drone_resource.delivery_times))
     print("mean drone wait time:", sum(drone_resource.drone_wait_time_list)/len(drone_resource.drone_wait_time_list))
-    print("chef wait time:", sum(chef_resource.chef_wait_time)/len(chef_resource.chef_wait_time))
+    print("mean chef wait time:", sum(chef_resource.chef_wait_time)/len(chef_resource.chef_wait_time))
+    print("mean order value:", sum(chef_resource.order_values)/len(chef_resource.order_values))
+    
+    plt.hist(drone_resource.delivery_times)
+    plt.xlabel('Histogram of delivery times')
+    plt.savefig('delivery_histogram.jpg')
+    # plt.show()
+    plt.close()
+
+    plt.hist(drone_resource.drone_wait_time_list)
+    plt.xlabel('Histogram of drone wait time')
+    plt.savefig('drone_wait_time_histogram.jpg')
+    # plt.show()
+    plt.close()
+
+    plt.hist(chef_resource.chef_wait_time)
+    plt.xlabel('Histogram of chef wait time')
+    plt.savefig('chef_wait_time_histogram.jpg')
+    # plt.show()
+    plt.close()
+
+    plt.hist(chef_resource.order_values)
+    plt.xlabel('Histogram of order value')
+    plt.savefig('order_value_histogram.jpg')
+    # plt.show()
+    plt.close()
+
+    for d in range(1, 5):
+        for c in range(1, 5):
+            delivery_time = optimize_chef_drone(d, c)
+
+            print(delivery_time, d, c)
