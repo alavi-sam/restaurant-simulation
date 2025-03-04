@@ -199,7 +199,7 @@ def order_source(env: simpy.Environment, chef_resource: ChefMonitoredResource, d
         order_id += 1
         order_value = value_gen()
         order_location = coord_gen()
-        # print(f"recieved order {order_id} at {env.now}")
+        print(f"recieved order {order_id} at {env.now}")
         stats[order_id] = {'order_time': env.now}
         env.process(order_prep(env, chef_resource, drone_resource, order_value, order_location, order_id))
         # print()
@@ -218,23 +218,26 @@ def order_prep(
     
     chef_req, order_id = yield from chef_resource.request(order_id)
     stats[order_id].update({'prep_start_time': env.now})
-    # print(f"chef is preparing {order_id} at {env.now}")
+    print(f"chef is preparing {order_id} at {env.now}")
     chef_wait_time = env.now - chef_request_time
     chef_resource.record_chef_wait_times(chef_wait_time)
     chef_resource.record_order_value(order_value)
     prep_time = prep_gen()
-    # print(f"{order_id} will take {prep_time}")
+    print(f"order {order_id} will take {prep_time}")
     stats[order_id].update({'prep_time': prep_time})
     yield env.timeout(prep_time)
-    # print(f"chef has done {order_id} at {env.now}")
+    print(f"chef has done {order_id} at {env.now}")
     stats[order_id].update({'prep_done': env.now})
     chef_resource.release(chef_req, order_id)
 
     drone_request_time = env.now
     
+    print(f"drone requested at {env.now}")
+
     stats[order_id].update({'drone_request_time': env.now})
 
     drone, req = yield from drone_resource.request()
+    print(f"drone {drone.drone_id}  picked up the order at {env.now}")
     stats[order_id].update({'drone_ready_time': env.now})
 
     drone_release_time = env.now
@@ -255,6 +258,7 @@ def order_prep(
     drone.drain_by_landing()
 
     drone_delivered_time = env.now
+    print(f"drone {drone.drone_id} delivered the order at {env.now}")
     drone_resource.record_delivery_wait_time(drone_delivered_time - chef_request_time)
     drone_resource.record_delivery_distance(travel_distance)
     stats[order_id].update({'delivered_time': env.now})
@@ -275,7 +279,7 @@ def order_prep(
         "time_to_charge": charge_time(drone.battery_level),
         "drone_end_time": env.now
     })
-
+    print(f"drone {drone.drone_id} released at {env.now}")
     yield drone_resource.release(req, drone)
 
 
