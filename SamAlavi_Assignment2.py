@@ -117,7 +117,8 @@ class Drone:
     def charge(self):
         yield self.env.timeout(charge_time(self.battery_level))
         self.battery_level = 100
-        self.is_charged.succeed()
+        if not self.is_charged.triggered:
+            self.is_charged.succeed()
 
 
 class DroneMonitoredResource(simpy.Resource):
